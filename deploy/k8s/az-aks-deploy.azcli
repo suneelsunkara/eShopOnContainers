@@ -1,0 +1,163 @@
+az login
+az aks get-versions --location southeastasia --output table
+kubectl config view
+
+#How do I delete clusters and contexts from kubectl config?
+kubectl config unset users.clusterUser_az-sea-aks-eshop-rg_az-sea-aks-cluster
+kubectl config unset contexts.az-sea-aks-cluster
+kubectl config unset clusters.az-sea-aks-cluster
+kubectl config delete-context az-sea-aks-cluster
+kubectl config set-context --current --namespace=minikube
+
+az ad sp create-for-rbac --skip-assignment --name az-aks-eshop-eus-sp
+az group delete --name az-aks-eshop-rg
+az group create --location southeastasia --name az-sea-aks-eshop-rg
+az aks create --resource-group az-sea-aks-eshop-rg --node-resource-group az-sea-aks-node-rg --name az-sea-aks-cluster --enable-rbac --enable-managed-identity --enable-addons monitoring,http_application_routing --kubernetes-version 1.18.10 --generate-ssh-keys --node-vm-size Standard_Ds2_v2 --node-count 1 --vm-set-type VirtualMachineScaleSets --network-plugin azure --load-balancer-sku basic --enable-cluster-autoscaler --min-count 1 --max-count 2
+
+#Create Azure Container Registry
+az acr create --resource-group az-sea-aks-eshop-rg --name eshoplocalregistry --sku Basic --location southeastasia
+
+az aks get-credentials --name az-sea-aks-cluster --resource-group az-sea-aks-eshop-rg
+
+#Set kubectl context
+kubectl config set-context --current --namespace=az-sea-aks-cluster
+kubectl config get-contexts
+
+#Install NGINX Ingress Controller - run the following commands from the deploy/k8s/nginx-ingress folder:
+kubectl apply -f mandatory.yaml
+kubectl apply -f local-cm.yaml
+kubectl apply -f local-svc.yaml
+
+#Deploy Public Images From DockerHub
+kubectl get namespaces
+kubectl create namespace az-sea-aks-cluster
+kubectl create namespace monitoring
+.\deploy-all.ps1 -externalDns aks -aksName az-sea-aks-cluster -aksRg az-sea-aks-eshop-rg -imageTag linux-dev -useMesh $false
+
+#check the deployments
+kubectl get deployment
+kubectl get pods
+kubectl get ing
+kubectl get logs
+
+#Allow Large Headers (needed for login to work)
+kubectl apply -f aks-httpaddon-cfg.yaml
+#restart the pod that runs the nginx controller
+$pod = kubectl get pod -l app=addon-http-application-routing-nginx-ingress -n kube-system -o jsonpath='{.items[0].metadata.name}'
+kubectl delete pod $pod -n kube-system
+
+#Start & Stop AKS Cluster
+az feature register --namespace "Microsoft.ContainerService" --name "StartStopPreview"
+az feature list -o table --query "[?contains(name, 'Microsoft.ContainerService/StartStopPreview')].{Name:name,State:properties.state}"
+az provider register --namespace Microsoft.ContainerService
+az aks stop --name az-sea-aks-cluster --resource-group az-sea-aks-eshop-rg
+az aks start --name az-sea-aks-cluster --resource-group az-sea-aks-eshop-rg
+
+#Check Status
+WebStatus: http://eshop.ed26ca0830ee429994bc.southeastasia.aksapp.io/webstatus
+WebMVC: http://eshop.ed26ca0830ee429994bc.southeastasia.aksapp.io/webmvc
+WebSPA: http://eshop.ed26ca0830ee429994bc.southeastasia.aksapp.io/
+
+#monitoring
+#git clone https://github.com/helm/charts.git
+helm del $(helm ls --all --short) 
+helm repo add grafana https://grafana.github.io/helm-charts
+helm install stable/grafana --generate-name --namespace monitoring
+
+https://github.com/PlagueHO/Workshop-AKS
+$dnsName=$(az aks show  --name az-sea-aks-cluster --resource-group az-sea-aks-eshop-rg --query 'addonProfiles.httpApplicationRouting.config.HTTPApplicationRoutingZoneName' -o tsv)
+helm install stable/grafana --generate-name --set "service.type=LoadBalancer,persistence.enabled=true,persistence.size=10Gi,persistence.accessModes[0]=ReadWriteOnce,plugins=grafana-azure-monitor-datasource\,grafana-kubernetes-app,ingress.enabled=true,ingress.annotations.kubernetes\.io/ingress\.class=addon-http-application-routing,ingress.hosts[0]=grafana.$dnsName" --namespace monitoring
+$pwd = kubectl get secret --namespace monitoring grafana-1608014216 -o jsonpath="{.data.admin-password}"
+echo $pwd
+ADa2a6csaiUIFe93ZaORI0wP4LwQzaJm3069qmO6
+$POD_NAME=$(kubectl get pods --namespace monitoring -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=grafana-1608014216" -o jsonpath="{.items[0].metadata.name}")
+echo $POD_NAME
+kubectl --namespace monitoring port-forward $POD_NAME 3000
+kubectl get services --namespace monitoring
+helm delete grafana-1607844255 --namespace monitoring
+
+
+#prometheus installation
+helm install stable/prometheus --namespace monitoring --set rbac.create=true --generate-name
+$POD_NAME=$(kubectl get pods --namespace monitoring -l "app=prometheus,component=server" -o jsonpath="{.items[0].metadata.name}")
+kubectl --namespace monitoring port-forward $POD_NAME 9090
+
+$POD_NAME=$(kubectl get pods --namespace monitoring -l "app=prometheus,component=pushgateway" -o jsonpath="{.items[0].metadata.name}")
+kubectl --namespace monitoring port-forward $POD_NAME 9091
+#browse to http://10.240.0.20:9090
+
+#Fetch Garfana DNS name
+
+
+#Dashboards to install
+#https://grafana.com/grafana/dashboards/6876
+#https://grafana.com/grafana/dashboards/6873
+#https://grafana.com/grafana/dashboards/6879
+#https://grafana.com/grafana/dashboards/13105
+
+Deploy local images as per below docs
+#https://github.com/dotnet-architecture/eShopOnContainers/wiki/Deploy-to-Azure-Kubernetes-Service-(AKS)#deploy-your-local-images
+
+#local image deployment
+docker login eshoplocalregistry.azurecr.io
+## enable Managed Identity & Access Keys in azure portal
+
+#get all linux latest images
+docker images | grep linux-latest
+***********************************************
+eshop/locations.api                    linux-latest          45d74bf03bfc        3 hours ago         236MB
+eshop/mobileshoppingagg                linux-latest          ceef464a0ea7        3 hours ago         292MB
+eshop/ordering.signalrhub              linux-latest          f13b08893bf8        3 hours ago         231MB
+eshop/webmvc                           linux-latest          f1ce23fa0852        3 hours ago         235MB
+eshop/webshoppingagg                   linux-latest          aa366ef0c7d6        3 hours ago         292MB
+eshop/marketing.api                    linux-latest          c1d26a972c58        3 hours ago         245MB
+eshop/basket.api                       linux-latest          1dd5971088d2        3 hours ago         235MB
+eshop/webspa                           linux-latest          c9735e7cc321        3 hours ago         216MB
+eshop/ordering.api                     linux-latest          4b67b8501d59        5 hours ago         242MB
+eshop/payment.api                      linux-latest          068954250ecd        5 hours ago         223MB
+eshop/catalog.api                      linux-latest          538968231273        5 hours ago         246MB
+eshop/ordering.backgroundtasks         linux-latest          af9377656d15        5 hours ago         214MB
+eshop/webstatus                        linux-latest          b6855d29286a        5 hours ago         233MB
+eshop/webhooks.client                  linux-latest          5a62a556fa4d        9 hours ago         230MB
+eshop/webhooks.api                     linux-latest          8dee383d0e13        9 hours ago         239MB
+eshop/identity.api                     linux-latest          4b023fa1bdff        9 hours ago         245MB
+***********************************************
+#Execute local image tagging
+docker tag eshop/mobileshoppingagg:linux-latest eshoplocalregistry.azurecr.io/eshop/mobileshoppingagg:linux-latest
+docker tag eshop/locations.api:linux-latest eshoplocalregistry.azurecr.io/eshop/locations.api:linux-latest
+docker tag eshop/ordering.signalrhub:linux-latest eshoplocalregistry.azurecr.io/eshop/ordering.signalrhub:linux-latest
+docker tag eshop/webmvc:linux-latest eshoplocalregistry.azurecr.io/eshop/webmvc:linux-latest
+docker tag eshop/webshoppingagg:linux-latest eshoplocalregistry.azurecr.io/eshop/webshoppingagg:linux-latest
+docker tag eshop/marketing.api:linux-latest eshoplocalregistry.azurecr.io/eshop/marketing.api:linux-latest
+docker tag eshop/basket.api:linux-latest eshoplocalregistry.azurecr.io/eshop/basket.api:linux-latest
+docker tag eshop/webspa:linux-latest eshoplocalregistry.azurecr.io/eshop/webspa:linux-latest
+docker tag eshop/ordering.api:linux-latest eshoplocalregistry.azurecr.io/eshop/ordering.api:linux-latest
+docker tag eshop/payment.api:linux-latest eshoplocalregistry.azurecr.io/eshop/payment.api:linux-latest
+docker tag eshop/catalog.api:linux-latest eshoplocalregistry.azurecr.io/eshop/catalog.api:linux-latest
+docker tag eshop/ordering.backgroundtasks:linux-latest eshoplocalregistry.azurecr.io/eshop/ordering.backgroundtasks:linux-latest
+docker tag eshop/webstatus:linux-latest eshoplocalregistry.azurecr.io/eshop/webstatus:linux-latest
+docker tag eshop/webhooks.client:linux-latest eshoplocalregistry.azurecr.io/eshop/webhooks.client:linux-latest
+docker tag eshop/webhooks.api:linux-latest eshoplocalregistry.azurecr.io/eshop/webhooks.api:linux-latest
+docker tag eshop/identity.api:linux-latest eshoplocalregistry.azurecr.io/eshop/identity.api:linux-latest
+
+#docker push
+docker push eshoplocalregistry.azurecr.io/eshop/mobileshoppingagg:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/locations.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/ordering.signalrhub:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webmvc:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webshoppingagg:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/marketing.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/basket.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webspa:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/ordering.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/payment.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/catalog.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/ordering.backgroundtasks:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webstatus:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webhooks.client:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/webhooks.api:linux-latest
+docker push eshoplocalregistry.azurecr.io/eshop/identity.api:linux-latest
+
+#deploy local images
+.\deploy-all.ps1 -externalDns aks -aksName az-sea-aks-cluster -aksRg az-sea-aks-eshop-rg -imageTag linux-latest -registry eshoplocalregistry.azurecr.io -dockerUser eshoplocalregistry -dockerPassword zq1EWGPS1usVR53KDqC0rU9OXMVQmo+l -useMesh $false
+
